@@ -36,6 +36,6 @@ ica.fit(raw)
 #plt.show()
 print(ica)
 
-ica.exclude = [0, 1]
-ica.apply(raw_clean)
-ica.plot_overlay(raw, exclude=[0, 1])
+#ica.exclude = [0, 1]
+#ica.apply(raw_clean)
+#ica.plot_overlay(raw, exclude=[0, 1])
