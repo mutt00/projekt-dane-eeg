@@ -1,7 +1,18 @@
 import mne
 
+from pathlib import Path
 
-raw = mne.io.read_raw_brainvision('/Users/natanstaron/ds007647-download/sub-01/eeg/sub-01_task-differentdoors_eeg.vhdr', preload = True)
+
+PROJECT_PATH = Path(__file__).parent
+DATA_DIR = 'data'
+
+
+# Read data
+raw = mne.io.read_raw_brainvision(
+    PROJECT_PATH / DATA_DIR / 'sub-01_task-differentdoors_eeg.vhdr',
+    preload = True
+)
+
 montage = mne.channels.make_standard_montage('standard_1020')
 raw.set_montage(montage)
 
