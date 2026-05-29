@@ -12,7 +12,8 @@
 git clone "https://github.com/mutt00/projekt-dane-eeg.git" different-doors-eeg
 cd different-doors-eeg/
 
-git clone "https://github.com/OpenNeuroDatasets/ds007647.git" data
+datalad clone "https://github.com/OpenNeuroDatasets/ds007647.git" data
+datalad get data/sub-01
 
 # requires mne
 python3 main.py
