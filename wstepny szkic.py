@@ -1,9 +1,6 @@
-import matplotlib
-matplotlib.use('Qt5Agg')
-import matplotlib.pyplot as plt
 import mne
 
-stare_pliki = '/Users/natanstaron/ds007647-download'
+
 raw = mne.io.read_raw_brainvision('/Users/natanstaron/ds007647-download/sub-01/eeg/sub-01_task-differentdoors_eeg.vhdr', preload = True)
 montage = mne.channels.make_standard_montage('standard_1020')
 raw.set_montage(montage)
