@@ -22,7 +22,7 @@ raw.rename_channels({"M1": "TP9", "M2": "TP10"}) # rename Mastoid electrodes to 
 raw.set_eeg_reference(ref_channels=["TP9", "TP10"], projection=False) # re-reference using mastoids, channels later dropped
 raw.set_montage("easycap-M1", match_case=False, on_missing="warn") # set montage
 
-# Remove bad channels
+# Remove bad impedance channels
 # for every channel, if its impedance value is not None and is > threshold, then mark as bad
 IMP_THRESH = 25
 bads = [
@@ -56,7 +56,7 @@ raw_cropped.plot(
     scalings={"eeg": 75e-6}
 )
 
-# drop mastoids from analysis
+# Drop mastoids from analysis
 raw.drop_channels(["TP9", "TP10"])
 
 #print(raw.info)
