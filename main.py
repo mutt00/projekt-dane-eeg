@@ -17,11 +17,14 @@ raw = mne.io.read_raw_brainvision(
 )
 
 raw.resample(sfreq=500, npad="auto") # downsample to 500Hz
+
 raw.filter(l_freq=0.1, h_freq=None, fir_design="firwin") # high-pass (for drift removal)
 raw.filter(l_freq=None, h_freq=80, fir_design="firwin") # low-pass (for EMG)
+
 raw.add_reference_channels(ref_channels=["Fz"]) # reference electrode at Fz
 raw.rename_channels({"M1": "TP9", "M2": "TP10"}) # rename Mastoid electrodes to TP9/TP10
 raw.set_eeg_reference(ref_channels=["TP9", "TP10"], projection=False) # re-reference using mastoids, channels later dropped
+
 raw.set_montage("easycap-M1", match_case=False, on_missing="warn") # set montage
 
 # Remove bad impedance channels

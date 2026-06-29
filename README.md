@@ -21,6 +21,7 @@ python3 main.py
 - re-reference at TP9, TP10
 - set montage as `easycap-M1` (brainvision 32-electrode)
 - filter out bad impedance channels (>25kOms)
+- drop TP9, TP10
 - notch-filter at 60 Hz derived from PSD
 - ICA (WIP)
 
