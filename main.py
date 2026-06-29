@@ -1,15 +1,76 @@
 import mne
-mne.viz.set_browser_backend('qt') # pip install pyqt5 mne-qt-browser
-
 from pathlib import Path
 
 
+mne.viz.set_browser_backend("qt") # pip install pyqt5 mne-qt-browser
+mne.set_log_level("WARNING")
+
 PROJECT_PATH = Path(__file__).parent
-DATA_DIR = 'data'
+DATA_DIR = "data"
 
-
-# Read data
+### Read data
+# data should live in 'data' dir adjacent to this script
 raw = mne.io.read_raw_brainvision(
-    PROJECT_PATH / DATA_DIR / 'sub-01' / 'eeg' / 'sub-01_task-differentdoors_eeg.vhdr',
+    PROJECT_PATH / DATA_DIR / "sub-01" / "eeg" / "sub-01_task-differentdoors_eeg.vhdr",
     preload = True
+)
+
+raw.add_reference_channels(ref_channels=["Fz"]) # reference electrode at Fz
+raw.rename_channels({"M1": "TP9", "M2": "TP10"}) # rename Mastoid electrodes to TP9/TP10
+raw.set_eeg_reference(ref_channels=["TP9", "TP10"], projection=False) # re-reference using mastoids
+raw.set_montage("easycap-M1", match_case=False, on_missing="warn") # set montage
+
+# Remove bad channels
+# for every channel, if its impedance value is not None and is > threshold, then mark as bad
+IMP_THRESH = 25
+bads = [
+    channel for channel, info in raw.impedances.items()
+    if channel in raw.ch_names
+    and info.get("imp") is not None
+    and info["imp"] > IMP_THRESH
+]
+raw.info["bads"] = bads
+
+
+### Sanity checks
+# All channels
+raw_cropped = raw.copy().crop(0, 60).load_data()
+raw_cropped.plot(
+    block=True,    
+    title="All channels [t0–60]",
+    duration=60,
+    n_channels=33
+)
+
+# Mastoids (TP9/10), should be inverse of eachother
+raw_cropped.plot(
+    block=True,
+    title="Mastoids (TP9/10) [t0–60]",
+    picks=["TP9", "TP10"],
+    scalings={"eeg": 75e-6}
+)
+
+#print(raw.info)
+"""
+<Info | 9 non-empty values
+ bads: ...
+ ch_names: ...
+ chs: 33 EEG
+ custom_ref_applied: True
+ dig: 36 items (3 Cardinal, 33 EEG)
+ highpass: 0.0 Hz
+ lowpass: 1000.0 Hz
+ meas_date: 2025-03-31 12:01:00 UTC
+ nchan: 33
+ projs: []
+ sfreq: 1000.0 Hz
+>
+"""
+
+raw.plot_sensors(
+    block=True,
+    title="Sensor plot",
+    ch_groups='position',
+    show_names=True,
+    sphere="auto"
 )
