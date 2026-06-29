@@ -31,6 +31,7 @@ bads = [
 ]
 raw.info["bads"] = bads
 
+# note: bad ref leaks noise to all channels, thence:
 for mastoid in ["TP9", "TP10"]:
     if mastoid in bads:
         print(f"{mastoid} (reref) bad impedance!")
@@ -70,6 +71,7 @@ raw_cropped.plot(
 >
 """
 
+# note: shows electrodes, not channels
 raw.plot_sensors(
     block=True,
     title="Sensor plot",
