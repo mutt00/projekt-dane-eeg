@@ -42,20 +42,18 @@ for mastoid in ["TP9", "TP10"]:
 ### Sanity checks
 # All channels
 raw_cropped = raw.copy().crop(0, 60)
-raw_cropped.plot(
-    block=True,    
-    title="All channels [t0–60]",
-    duration=60,
-    n_channels=33
-)
+# raw_cropped.plot(
+#     title="All channels [t0–60]",
+#     duration=60,
+#     n_channels=33
+# )
 
-# Mastoids (TP9/10), should be inverse of eachother
-raw_cropped.plot(
-    block=True,
-    title="Mastoids (TP9/10) [t0–60]",
-    picks=["TP9", "TP10"],
-    scalings={"eeg": 75e-6}
-)
+# Mastoids (TP9/10), plots be inverse of eachother
+# raw_cropped.plot(
+#     title="Mastoids (TP9/10) [t0–60]",
+#     picks=["TP9", "TP10"],
+#     scalings={"eeg": 75e-6}
+# )
 
 # Drop mastoids from analysis
 raw.drop_channels(["TP9", "TP10"])
@@ -79,10 +77,46 @@ raw.drop_channels(["TP9", "TP10"])
 
 # Sensors
 # note: plots electrodes, not channels
-raw.plot_sensors(
-    block=True,
-    title="Sensor plot",
-    ch_groups='position',
-    show_names=True,
-    sphere="auto"
+# raw.plot_sensors(
+#     title="Sensor plot",
+#     ch_groups='position',
+#     show_names=True,
+#     sphere="auto"
+# )
+
+# PSD (power spectrum density)
+
+spectrum = raw.compute_psd(method="welch", n_fft=int(4 * raw.info["sfreq"]))
+
+# # pre-notch
+# spectrum.plot(
+#     average=False,
+#     spatial_colors=True
+# )
+
+# from PSD
+raw.notch_filter(
+    freqs=[60], # US; harmonics (120, 180...) already covered by band-pass
+    method="spectrum_fit",
+    filter_length="10s"
 )
+
+
+# # post-notch
+# spectrum = raw.compute_psd(method="welch", n_fft=int(4 * raw.info["sfreq"]))
+# spectrum.plot(
+#     average=False,
+#     spatial_colors=True
+# )
+
+# spectrum.plot_topo(color="k", fig_facecolor="w", axis_facecolor="w")
+
+# spectrum.plot_topomap(
+#     bands={"Delta (1-4 Hz)": (1, 4),
+#            "Theta (4-8 Hz)": (4, 8),
+#            "Alpha (8-12 Hz)": (8, 12),
+#            "Beta (13-30 Hz)": (13, 30),
+#            "Gamma (30-45 Hz)": (30, 45)},
+#     normalize=True,
+# )
+
