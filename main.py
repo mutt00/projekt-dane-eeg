@@ -38,7 +38,7 @@ for mastoid in ["TP9", "TP10"]:
 
 ### Sanity checks
 # All channels
-raw_cropped = raw.copy().crop(0, 60).load_data()
+raw_cropped = raw.copy().crop(0, 60)
 raw_cropped.plot(
     block=True,    
     title="All channels [t0–60]",
