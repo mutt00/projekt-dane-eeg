@@ -31,6 +31,9 @@ bads = [
 ]
 raw.info["bads"] = bads
 
+for mastoid in ["TP9", "TP10"]:
+    if mastoid in bads:
+        print(f"{mastoid} (reref) bad impedance!")
 
 ### Sanity checks
 # All channels
