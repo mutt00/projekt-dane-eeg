@@ -1,4 +1,5 @@
 import mne
+from mne.preprocessing import ICA
 from pathlib import Path
 
 
@@ -120,3 +121,43 @@ raw.notch_filter(
 #     normalize=True,
 # )
 
+### ICA
+
+# high-pass filtered copy of raw for ICA
+raw_for_ica = raw.copy().filter(l_freq=1.0, h_freq=None, fir_design="firwin")
+
+# each rank-reducing operation (eg. re-referencing) must be accounted for, otherwise ICA overfits
+rank = mne.compute_rank(raw_for_ica, rank="info")
+n_components = rank["eeg"]
+#print(f"Data rank: {n_components}")
+
+ica = ICA(
+    n_components=n_components,
+    method="picard",
+    fit_params=dict(ortho=False, extended=True),
+    max_iter=500,
+    random_state=97 # keep this fixed
+)
+ica.fit(raw_for_ica, decim=5) # decim=12 for 1000Hz
+
+# ica.plot_sources(raw_for_ica, show_scrollbars=True) # time courses
+# ica.plot_components() # topographies
+
+muscle_indices, muscle_scores = ica.find_bads_muscle(raw_for_ica)
+
+ica.exclude = list(set(muscle_indices))
+print(f"Marked for exclusion: {ica.exclude}")
+
+ica.apply(raw)
+
+spectrum.plot_topomap(
+    bands={"Delta (1-4 Hz)": (1, 4),
+           "Theta (4-8 Hz)": (4, 8),
+           "Alpha (8-12 Hz)": (8, 12),
+           "Beta (13-30 Hz)": (13, 30),
+           "Gamma (30-45 Hz)": (30, 45)},
+    normalize=True,
+)
+
+
+input()
