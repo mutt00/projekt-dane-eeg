@@ -15,6 +15,7 @@ raw = mne.io.read_raw_brainvision(
     preload = True
 )
 
+raw.resample(sfreq=500, npad="auto") # downsample to 500Hz
 raw.filter(l_freq=0.1, h_freq=None, fir_design="firwin") # high-pass (for drift removal)
 raw.filter(l_freq=None, h_freq=80, fir_design="firwin") # low-pass (for EMG)
 raw.add_reference_channels(ref_channels=["Fz"]) # reference electrode at Fz
@@ -72,7 +73,7 @@ raw.drop_channels(["TP9", "TP10"])
  meas_date: 2025-03-31 12:01:00 UTC
  nchan: 33
  projs: []
- sfreq: 1000.0 Hz
+ sfreq: 500.0 Hz
 >
 """
 
