@@ -74,7 +74,8 @@ raw.drop_channels(["TP9", "TP10"])
 >
 """
 
-# note: shows electrodes, not channels
+# Sensors
+# note: plots electrodes, not channels
 raw.plot_sensors(
     block=True,
     title="Sensor plot",
