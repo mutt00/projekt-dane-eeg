@@ -59,9 +59,6 @@ raw_cropped = raw.copy().crop(0, 60)
 #     scalings={"eeg": 75e-6}
 # )
 
-# Drop mastoids from analysis
-raw.drop_channels(["TP9", "TP10"])
-
 #print(raw.info)
 """
 <Info | 9 non-empty values
@@ -87,6 +84,9 @@ raw.drop_channels(["TP9", "TP10"])
 #     show_names=True,
 #     sphere="auto"
 # )
+
+# Drop mastoids from analysis
+raw.drop_channels(["TP9", "TP10"])
 
 # PSD (power spectrum density)
 
