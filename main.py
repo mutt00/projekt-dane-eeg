@@ -1,4 +1,5 @@
 import mne
+mne.viz.set_browser_backend('qt') # pip install pyqt5 mne-qt-browser
 
 from pathlib import Path
 
