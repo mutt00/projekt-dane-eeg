@@ -17,7 +17,7 @@ raw = mne.io.read_raw_brainvision(
 
 raw.add_reference_channels(ref_channels=["Fz"]) # reference electrode at Fz
 raw.rename_channels({"M1": "TP9", "M2": "TP10"}) # rename Mastoid electrodes to TP9/TP10
-raw.set_eeg_reference(ref_channels=["TP9", "TP10"], projection=False) # re-reference using mastoids
+raw.set_eeg_reference(ref_channels=["TP9", "TP10"], projection=False) # re-reference using mastoids, channels later dropped
 raw.set_montage("easycap-M1", match_case=False, on_missing="warn") # set montage
 
 # Remove bad channels
@@ -53,6 +53,9 @@ raw_cropped.plot(
     picks=["TP9", "TP10"],
     scalings={"eeg": 75e-6}
 )
+
+# drop mastoids from analysis
+raw.drop_channels(["TP9", "TP10"])
 
 #print(raw.info)
 """
