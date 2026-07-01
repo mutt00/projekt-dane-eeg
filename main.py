@@ -1,13 +1,19 @@
 import mne
 from mne.preprocessing import ICA
+from mne_icalabel import label_components
 from pathlib import Path
 
 
 mne.viz.set_browser_backend("qt") # pip install pyqt5 mne-qt-browser
-mne.set_log_level("INFO")
+mne.set_log_level("ERROR")
 
-#PROJECT_PATH = Path(__file__).parent
-PROJECT_PATH = Path.cwd()
+
+#==== Ładowanie danych ====#
+
+# bezpieczniejsze, zawsze prawdziwa lokalizacja pliku
+PROJECT_PATH = Path(__file__).parent
+
+#PROJECT_PATH = Path.cwd()
 
 DATA_DIR = "data"
 
@@ -16,19 +22,45 @@ raw = mne.io.read_raw_brainvision(
     preload = True
 )
 
-raw.resample(sfreq=500, npad="auto") # downsample to 500Hz
 
-raw.filter(l_freq=1.0, h_freq=100.0, fir_design="firwin") # high-pass (for drift removal)
+#==== Podstawowy preprocessing ====#
 
-raw.add_reference_channels(ref_channels=["Fz"]) # reference electrode at Fz
-raw.rename_channels({"M1": "TP9", "M2": "TP10"}) # rename Mastoid electrodes to TP9/TP10
-raw.set_eeg_reference(ref_channels=["TP9", "TP10"], projection=False) # re-reference using mastoids, channels later dropped
+# downsample to 500Hz
+raw.resample(sfreq=500, npad="auto")
 
-raw.set_montage("easycap-M1", match_case=False, on_missing="warn") # set montage
+# ogólny filtr
+# high-pass powyżej 0.1 Hz może zniekształcić ERPy
+raw.filter(l_freq=0.1, h_freq=100.0, fir_design="firwin")
 
-# Remove bad impedance channels
-# for every channel, if its impedance value is not None and is > threshold, then mark as bad
-IMP_THRESH = 25
+# refka na Fz (z badania)
+raw.add_reference_channels(ref_channels=["Fz"])
+
+# re-reference na podstawie średniej ze wszystkich kanałów
+raw.set_eeg_reference("average", projection=False)
+
+# zmień nazwę M1/M2 na TP9/TP10 (najbliższy odpowiednik w montażu)
+# raw.rename_channels({"M1": "TP9", "M2": "TP10"})
+
+# usuń M1, M2 (nie używamy ich do re-reference)
+raw.drop_channels(["M1", "M2"], on_missing="warn")
+
+# ustaw montaż
+raw.set_montage("easycap-M1", match_case=False, on_missing="warn")
+
+raw.notch_filter(
+    freqs=[60], # US; harmonics (120, 180...) already covered by low-pass
+    method="firwin",
+    filter_length="10s"
+)
+
+
+#==== Oznaczanie kanałów powyżej progu impedancji ====#
+
+# 20 kOhms (z badania)
+IMP_THRESH = 20
+
+# dla każdego kanału, jeśli wartość impedancji nie jest
+# None i jest powyżej progu, zaznacz jako "bad"
 bads = [
     channel for channel, info in raw.impedances.items()
     if channel in raw.ch_names
@@ -36,29 +68,88 @@ bads = [
     and info["imp"] > IMP_THRESH
 ]
 raw.info["bads"] = bads
+print(f"Bads ({len(raw.info['bads'])}): {raw.info['bads']}")
 
-# note: bad ref leaks noise to all channels, thence:
-for mastoid in ["TP9", "TP10"]:
-    if mastoid in bads:
-        print(f"{mastoid} (reref) bad impedance!")
-raw.drop_channels(["TP9", "TP10"])
 
-from mne.preprocessing import ICA
-from mne_icalabel import label_components
+#==== Sanity check pre-ICA ====#
 
-# 1. Przygotowanie danych pod ICLabel (Wymóg: filtr 1-100 Hz)
-raw_for_ica = raw.copy().filter(l_freq=1.0, h_freq=100.0, fir_design="firwin")
+print(raw.info)
 
-# 2. Obliczenie rzędu i dopasowanie ICA (Twój oryginalny, poprawny kod)
+raw.plot()
+
+# plot sensors (electrodes)
+raw.plot_sensors(
+    title="Sensor plot",
+    ch_groups='position',
+    show_names=True,
+    sphere="auto"
+)
+
+# PSD
+spectrum = raw.compute_psd(
+    method="welch",
+    n_fft=int(4 * raw.info["sfreq"]),
+    fmin=0,
+    fmax=100.0 # just in case 
+)
+
+# zapobiega przeciągania wykresu w kierunku minus nieskończoności
+# (Fz/ref == same zera)
+picks_no_fz = [channel for channel in raw.ch_names if channel != "Fz"]
+spectrum.plot(
+    average=False,
+    spatial_colors=True,
+    picks=picks_no_fz
+)
+
+
+#==== ICA ====#
+# Wymóg: filtr 1-100 Hz
+# uwaga: low-pass 100 Hz już zastosowany na raw
+
+raw_for_ica = raw.copy().filter(l_freq=1.0, h_freq=None, fir_design="firwin")
 rank = mne.compute_rank(raw_for_ica, rank="info")
+print(f"n_channels (w tym Fz): {len(raw.ch_names)}")
+print(f"Ranga danych: {rank['eeg']}")
+
+# MNE nie loguje utraty rangi na skutek refowania (?), więc:
+real_rank = rank['eeg'] - 1
+print(f"Prawdziwa ranga danych: {real_rank}")
+
 ica = ICA(
-    n_components=rank["eeg"],
+    n_components=real_rank,
     method="picard",
     fit_params=dict(ortho=False, extended=True),
-    max_iter=500,
+    max_iter="auto",
     random_state=97
 )
 ica.fit(raw_for_ica, decim=5)
+
+ica.plot_components() # topografia komponentów
+ica.plot_sources(raw) # wykres
+
+# dobór komponentów na podstawie topografii i wykresów
+manual_excludes = sorted(list(set([1, 9, 11, 13, 15, 16, 18, 19, 20, 21, 22, 24, 26, 27])))
+print(f"Ręcznie wybrane komponenty ({len(manual_excludes)}/{real_rank}): {manual_excludes}")
+
+ica.exclude = manual_excludes
+
+#ica.plot_properties(raw_for_ica, picks=ica.exclude)
+
+# porównanie z raw
+ica.plot_overlay(raw, exclude=ica.exclude)
+
+raw_after_manual_ica = raw.copy()
+ica.apply(raw_after_manual_ica)
+
+# check
+raw_after_manual_ica.plot()
+
+
+#==== ICLabel ====#
+
+
+# 2. Obliczenie rzędu i dopasowanie ICA (Twój oryginalny, poprawny kod)
 
 # 3. Zastosowanie algorytmu ICLabel
 ic_labels = label_components(raw_for_ica, ica, method="iclabel")
