@@ -4,13 +4,13 @@ from pathlib import Path
 
 
 mne.viz.set_browser_backend("qt") # pip install pyqt5 mne-qt-browser
-mne.set_log_level("WARNING")
+mne.set_log_level("INFO")
 
-PROJECT_PATH = Path(__file__).parent
+#PROJECT_PATH = Path(__file__).parent
+PROJECT_PATH = Path.cwd()
+
 DATA_DIR = "data"
 
-### Read data
-# data should live in 'data' dir adjacent to this script
 raw = mne.io.read_raw_brainvision(
     PROJECT_PATH / DATA_DIR / "sub-01" / "eeg" / "sub-01_task-differentdoors_eeg.vhdr",
     preload = True
@@ -18,8 +18,7 @@ raw = mne.io.read_raw_brainvision(
 
 raw.resample(sfreq=500, npad="auto") # downsample to 500Hz
 
-raw.filter(l_freq=0.1, h_freq=None, fir_design="firwin") # high-pass (for drift removal)
-raw.filter(l_freq=None, h_freq=80, fir_design="firwin") # low-pass (for EMG)
+raw.filter(l_freq=1.0, h_freq=100.0, fir_design="firwin") # high-pass (for drift removal)
 
 raw.add_reference_channels(ref_channels=["Fz"]) # reference electrode at Fz
 raw.rename_channels({"M1": "TP9", "M2": "TP10"}) # rename Mastoid electrodes to TP9/TP10
@@ -42,125 +41,94 @@ raw.info["bads"] = bads
 for mastoid in ["TP9", "TP10"]:
     if mastoid in bads:
         print(f"{mastoid} (reref) bad impedance!")
-
-### Sanity checks
-# All channels
-raw_cropped = raw.copy().crop(0, 60)
-# raw_cropped.plot(
-#     title="All channels [t0–60]",
-#     duration=60,
-#     n_channels=33
-# )
-
-# Mastoids (TP9/10), plots be inverse of eachother
-# raw_cropped.plot(
-#     title="Mastoids (TP9/10) [t0–60]",
-#     picks=["TP9", "TP10"],
-#     scalings={"eeg": 75e-6}
-# )
-
-#print(raw.info)
-"""
-<Info | 9 non-empty values
- bads: ...
- ch_names: ...
- chs: 33 EEG
- custom_ref_applied: True
- dig: 36 items (3 Cardinal, 33 EEG)
- highpass: 0.0 Hz
- lowpass: 1000.0 Hz
- meas_date: 2025-03-31 12:01:00 UTC
- nchan: 33
- projs: []
- sfreq: 500.0 Hz
->
-"""
-
-# Sensors
-# note: plots electrodes, not channels
-# raw.plot_sensors(
-#     title="Sensor plot",
-#     ch_groups='position',
-#     show_names=True,
-#     sphere="auto"
-# )
-
-# Drop mastoids from analysis
 raw.drop_channels(["TP9", "TP10"])
 
-# PSD (power spectrum density)
+from mne.preprocessing import ICA
+from mne_icalabel import label_components
 
-spectrum = raw.compute_psd(method="welch", n_fft=int(4 * raw.info["sfreq"]))
+# 1. Przygotowanie danych pod ICLabel (Wymóg: filtr 1-100 Hz)
+raw_for_ica = raw.copy().filter(l_freq=1.0, h_freq=100.0, fir_design="firwin")
 
-# # pre-notch
-# spectrum.plot(
-#     average=False,
-#     spatial_colors=True
-# )
-
-# from PSD
-raw.notch_filter(
-    freqs=[60], # US; harmonics (120, 180...) already covered by band-pass
-    method="spectrum_fit",
-    filter_length="10s"
-)
-
-
-# # post-notch
-# spectrum = raw.compute_psd(method="welch", n_fft=int(4 * raw.info["sfreq"]))
-# spectrum.plot(
-#     average=False,
-#     spatial_colors=True
-# )
-
-# spectrum.plot_topo(color="k", fig_facecolor="w", axis_facecolor="w")
-
-# spectrum.plot_topomap(
-#     bands={"Delta (1-4 Hz)": (1, 4),
-#            "Theta (4-8 Hz)": (4, 8),
-#            "Alpha (8-12 Hz)": (8, 12),
-#            "Beta (13-30 Hz)": (13, 30),
-#            "Gamma (30-45 Hz)": (30, 45)},
-#     normalize=True,
-# )
-
-### ICA
-
-# high-pass filtered copy of raw for ICA
-raw_for_ica = raw.copy().filter(l_freq=1.0, h_freq=None, fir_design="firwin")
-
-# each rank-reducing operation (eg. re-referencing) must be accounted for, otherwise ICA overfits
+# 2. Obliczenie rzędu i dopasowanie ICA (Twój oryginalny, poprawny kod)
 rank = mne.compute_rank(raw_for_ica, rank="info")
-n_components = rank["eeg"]
-#print(f"Data rank: {n_components}")
-
 ica = ICA(
-    n_components=n_components,
+    n_components=rank["eeg"],
     method="picard",
     fit_params=dict(ortho=False, extended=True),
     max_iter=500,
-    random_state=97 # keep this fixed
+    random_state=97
 )
-ica.fit(raw_for_ica, decim=5) # decim=12 for 1000Hz
+ica.fit(raw_for_ica, decim=5)
 
-# ica.plot_sources(raw_for_ica, show_scrollbars=True) # time courses
-# ica.plot_components() # topographies
+# 3. Zastosowanie algorytmu ICLabel
+ic_labels = label_components(raw_for_ica, ica, method="iclabel")
 
-muscle_indices, muscle_scores = ica.find_bads_muscle(raw_for_ica)
+labels = ic_labels["labels"] # np. 'brain', 'eye blink', 'muscle artifact'
+probs = ic_labels["y_pred_proba"] # pewność modelu od 0.0 do 1.0
 
-ica.exclude = list(set(muscle_indices))
-print(f"Marked for exclusion: {ica.exclude}")
+# (Opcjonalnie) Wypisanie wyników do konsoli, żeby wiedzieć co się dzieje
+print("\n--- Wyniki klasyfikacji ICLabel ---")
+for idx, (label, prob) in enumerate(zip(labels, probs)):
+    print(f"IC{idx:02d}: {label:15s} (pewność: {prob:.2f})")
 
+# 4. Oznaczenie artefaktów do usunięcia
+# Zostawiamy sygnały sklasyfikowane jako "brain" i "other"
+exclude_categories = ["muscle artifact", "eye blink", "heart beat", "line noise", "channel noise"]
+ica.exclude = [
+    idx for idx, label in enumerate(labels)
+    if label in exclude_categories
+]
+print(f"\nUsunięte komponenty (artefakty): {ica.exclude}")
+
+# 5. Zastosowanie czystego ICA na Twoim oryginalnym sygnale (tym 0.1 - 80 Hz)
 ica.apply(raw)
 
-spectrum.plot_topomap(
-    bands={"Delta (1-4 Hz)": (1, 4),
-           "Theta (4-8 Hz)": (4, 8),
-           "Alpha (8-12 Hz)": (8, 12),
-           "Beta (13-30 Hz)": (13, 30),
-           "Gamma (30-45 Hz)": (30, 45)},
-    normalize=True,
+epochs = mne.Epochs(
+    raw, 
+    events, 
+    event_id=event_dict,
+    tmin=-0.2, 
+    tmax=0.6,
+    baseline=(-0.2, 0.0),
+    preload=True,
+    reject=None # Na tym etapie nic nie wyrzucamy!
 )
 
+# 2. Tworzymy symulację odrzucania na kopii danych, żeby zidentyfikować zepsute kanały
+reject_criteria = dict(eeg=150e-6)
+epochs_test = epochs.copy().drop_bad(reject=reject_criteria)
 
-input()
+# Zliczamy, ile razy każda elektroda zepsuła epokę
+dropped_counts = {ch: 0 for ch in epochs.ch_names}
+total_epochs = len(epochs)
+
+# drop_log to lista, która mówi nam, co było powodem usunięcia danej epoki
+for drop_reason in epochs_test.drop_log:
+    # Jeśli powodem był skok napięcia na kanale, dodajemy punkt karny dla tej elektrody
+    for ch in drop_reason:
+        if ch in dropped_counts:
+            dropped_counts[ch] += 1
+
+# Szukamy elektrod, które psują więcej niż 10% epok
+threshold = 0.10 * total_epochs
+noisy_electrodes = [ch for ch, count in dropped_counts.items() if count > threshold]
+
+print(f"Zaszumione elektrody (>10% zepsutych epok): {noisy_electrodes}")
+
+# 3. Decyzja zgodnie z tekstem (Interpolacja vs Wyrzucenie badanego)
+if len(noisy_electrodes) > 3:
+    # W normalnym workflow tutaj skrypt by przerwał działanie dla tego pliku
+    print("UWAGA: Badany ma więcej niż 3 zepsute elektrody! Zgodnie z artykułem wylatuje.")
+else:
+    # Oznaczamy elektrody jako zepsute na głównych danych
+    epochs.info['bads'] = noisy_electrodes
+    
+    # Interpolujemy (odbudowujemy sygnał na podstawie dobrych sąsiadów)
+    epochs.interpolate_bads(reset_bads=True)
+    print("Złe elektrody zostały zinterpolowane.")
+    
+    # 4. WŁAŚCIWE ODRZUCENIE EPOK
+    # Teraz, gdy złe kanały są naprawione, aplikujemy nasze odrzucanie napięciowe (150 uV)
+    # na ostateczne dane, aby wyczyścić resztki (np. rzeczywiste ruchy głowy)
+    epochs.drop_bad(reject=reject_criteria)
+    print(f"Pozostało czystych epok do ERP: {len(epochs)}")
