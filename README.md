@@ -14,16 +14,15 @@ python3 main.py
 
 ## Processing
 - downsample from 1000 Hz to 500 Hz
-- high-pass 0.1 Hz
-- low-pass 80 Hz
-- set Fz as reference electrode
-- rename M1, M2 to TP9, TP10
-- re-reference at TP9, TP10
+- filter 0.1–100.0 Hz
+- drop channels M1, M2
+- set Fz as reference electrode, re-reference from average
 - set montage as `easycap-M1` (brainvision 32-electrode)
-- filter out bad impedance channels (>25kOms)
+- filter out bad impedance channels (>20kOms), mark T7 as bad
 - drop TP9, TP10
-- notch-filter at 60 Hz derived from PSD
-- ICA (WIP)
+- notch-filter at 60 Hz
+- ICA wip
+- Epochs events wip
 
 ## Bibliografia
 
