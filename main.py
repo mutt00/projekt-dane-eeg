@@ -10,10 +10,8 @@ mne.set_log_level("ERROR")
 
 #==== Ładowanie danych ====#
 
-# bezpieczniejsze, zawsze prawdziwa lokalizacja pliku
-PROJECT_PATH = Path(__file__).parent
-
 #PROJECT_PATH = Path.cwd()
+PROJECT_PATH = Path(__file__).parent # bezpieczniejsze
 
 DATA_DIR = "data"
 
@@ -92,7 +90,7 @@ spectrum = raw.compute_psd(
     method="welch",
     n_fft=int(4 * raw.info["sfreq"]),
     fmin=0,
-    fmax=100.0 # just in case 
+    fmax=100.0 # force Qt
 )
 
 # zapobiega przeciągania wykresu w kierunku minus nieskończoności
