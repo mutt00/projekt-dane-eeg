@@ -10,7 +10,7 @@ mne.set_log_level("ERROR")
 
 #==== Ładowanie danych ====#
 
-#PROJECT_PATH = Path.cwd()
+#PROJECT_PATH = Path.cwd() # jupyter
 PROJECT_PATH = Path(__file__).parent # bezpieczniejsze
 
 DATA_DIR = "data"
@@ -112,12 +112,14 @@ spectrum.plot(
 # uwaga: low-pass 100 Hz już zastosowany na raw
 
 raw_for_ica = raw.copy().filter(l_freq=1.0, h_freq=None, fir_design="firwin")
+
+n_channels = len(raw.ch_names) - len(raw.info["bads"])
 rank = mne.compute_rank(raw_for_ica, rank="info")
-print(f"n_channels (w tym Fz): {len(raw.ch_names)}")
-print(f"Ranga danych: {rank['eeg']}")
+print(f"n_channels (w tym Fz): {n_channels}")
+print(f"Ranga danych (auto): {rank['eeg']}")
 
 # MNE nie loguje utraty rangi na skutek refowania (?), więc:
-real_rank = rank['eeg'] - 1
+real_rank = rank['eeg'] - 1 # Fz reference
 print(f"Prawdziwa ranga danych: {real_rank}")
 
 ica = ICA(
@@ -152,10 +154,10 @@ raw_after_manual_ica.plot()
 
 #==== ICLabel ====#
 
+# ica = ICA(...)
+# ica.fit(...)
 
-# 2. Obliczenie rzędu i dopasowanie ICA (Twój oryginalny, poprawny kod)
-
-# 3. Zastosowanie algorytmu ICLabel
+# Algorytm ICLabel
 ic_labels = label_components(raw_for_ica, ica, method="iclabel")
 
 labels = ic_labels["labels"] # np. 'brain', 'eye blink', 'muscle artifact'
@@ -166,8 +168,8 @@ print("\n--- Wyniki klasyfikacji ICLabel ---")
 for idx, (label, prob) in enumerate(zip(labels, probs)):
     print(f"IC{idx:02d}: {label:15s} (pewność: {prob:.2f})")
 
-# 4. Oznaczenie artefaktów do usunięcia
-# Zostawiamy sygnały sklasyfikowane jako "brain" i "other"
+# Oznaczenie artefaktów do usunięcia
+# (zostawiamy sygnały sklasyfikowane jako "brain" i "other")
 exclude_categories = ["muscle artifact", "eye blink", "heart beat", "line noise", "channel noise"]
 ica.exclude = [
     idx for idx, label in enumerate(labels)
@@ -175,21 +177,40 @@ ica.exclude = [
 ]
 print(f"\nUsunięte komponenty (artefakty): {ica.exclude}")
 
-# 5. Zastosowanie czystego ICA na Twoim oryginalnym sygnale (tym 0.1 - 80 Hz)
-ica.apply(raw)
+raw_after_iclabel = raw.copy()
+ica.apply(raw_after_iclabel)
+
+# check
+raw_after_iclabel.copy().crop(tmin=140, tmax=160).plot(
+    scalings=dict(eeg=20e-6),
+    duration=20,
+    n_channels=31
+)
+
+
+#==== Epochs, events ====#
+
+# załóżmy, że moje jest lepsze ;)
+#raw = raw_after_iclabel.copy()
+raw_after_ica = raw_after_manual_ica.copy()
+
+events, event_dict = mne.events_from_annotations(raw)
+print("\nEvent dictionary inferred from annotations:")
+for k,v in event_dict.items():
+    print(k, ".......",  v)
 
 epochs = mne.Epochs(
-    raw, 
+    raw_after_ica,
     events, 
     event_id=event_dict,
-    tmin=-0.2, 
-    tmax=0.6,
+    tmin=-0.2, # (z badania)
+    tmax=0.6, # (z badania)
     baseline=(-0.2, 0.0),
     preload=True,
     reject=None # Na tym etapie nic nie wyrzucamy!
 )
 
-# 2. Tworzymy symulację odrzucania na kopii danych, żeby zidentyfikować zepsute kanały
+# Tworzymy symulację odrzucania na kopii danych, żeby zidentyfikować zepsute kanały
 reject_criteria = dict(eeg=150e-6)
 epochs_test = epochs.copy().drop_bad(reject=reject_criteria)
 
@@ -210,7 +231,7 @@ noisy_electrodes = [ch for ch, count in dropped_counts.items() if count > thresh
 
 print(f"Zaszumione elektrody (>10% zepsutych epok): {noisy_electrodes}")
 
-# 3. Decyzja zgodnie z tekstem (Interpolacja vs Wyrzucenie badanego)
+# Decyzja zgodnie z tekstem (Interpolacja vs Wyrzucenie badanego)
 if len(noisy_electrodes) > 3:
     # W normalnym workflow tutaj skrypt by przerwał działanie dla tego pliku
     print("UWAGA: Badany ma więcej niż 3 zepsute elektrody! Zgodnie z artykułem wylatuje.")
@@ -222,7 +243,7 @@ else:
     epochs.interpolate_bads(reset_bads=True)
     print("Złe elektrody zostały zinterpolowane.")
     
-    # 4. WŁAŚCIWE ODRZUCENIE EPOK
+    # Właściwe drzucenie epok
     # Teraz, gdy złe kanały są naprawione, aplikujemy nasze odrzucanie napięciowe (150 uV)
     # na ostateczne dane, aby wyczyścić resztki (np. rzeczywiste ruchy głowy)
     epochs.drop_bad(reject=reject_criteria)
