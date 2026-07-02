@@ -155,6 +155,19 @@ print(f"Ranga danych (auto): {rank['eeg']}")
 real_rank = rank['eeg'] - 1 # Fz reference
 print(f"Prawdziwa ranga danych: {real_rank}")
 
+# ICA na raw nie działało dobrze, ze względu charakterystyke artefaktów,
+# można też zrobić na epokach
+events, event_dict = mne.events_from_annotations(raw)
+epochs_for_manual_ica = mne.Epochs(
+    raw_for_ica, events, event_id=event_dict,
+    tmin=-0.2, tmax=0.6,
+    baseline=None, preload=True,
+    reject_by_annotation=True,
+)
+
+# uwaga: nie koniecznie deterministyczne, reprodukowalność wymaga
+# conajmniej tych samych danych (raw), tego samego random_state,
+# oraz tych samych parametrów (np. picard, ortho=F, extended=T)
 ica = ICA(
     n_components=real_rank,
     method="picard",
@@ -162,14 +175,14 @@ ica = ICA(
     max_iter="auto",
     random_state=97
 )
-ica.fit(raw_for_ica, decim=5)
+ica.fit(epochs_for_manual_ica, decim=5)
 
 ica.plot_components() # topografia komponentów
-ica.plot_sources(raw) # wykres
+ica.plot_sources(raw.copy().crop(tmin=140, tmax=160)) # przykładowy odcinek
 
-# dobór komponentów na podstawie topografii i wykresów
-manual_excludes = sorted(list(set([1, 9, 11, 13, 15, 16, 18, 19, 20, 21, 22, 24, 26, 27])))
-print(f"Ręcznie wybrane komponenty ({len(manual_excludes)}/{real_rank}): {manual_excludes}")
+# dobór komponentów na podstawie ica.plot_components() i ica.plot_sources(raw)
+manual_excludes = sorted(list(set([0, 17, 6, 8, 12, 15, 16, 17, 18, 21, 22, 26, 28, 25, 27])))
+print(f"Ręcznie wybrane komponenty ({len(manual_excludes)}/{ica.n_components_}): {manual_excludes}")
 
 ica.exclude = manual_excludes
 
