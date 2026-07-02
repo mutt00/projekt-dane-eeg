@@ -29,7 +29,9 @@ raw = mne.io.read_raw_brainvision(
 raw.resample(sfreq=500, npad="auto")
 
 # ogólny filtr
-# high-pass powyżej 0.1 Hz może zniekształcić ERPy
+# - high-pass powyżej 0.1 Hz może zniekształcić ERPy
+# - w badaniu użyto low-pass 30 Hz oraz ICLabel, lecz
+#   ICLabel preferuje 1-100 Hz
 raw.filter(l_freq=0.1, h_freq=100.0, fir_design="firwin")
 
 # refka na Fz (z badania)
