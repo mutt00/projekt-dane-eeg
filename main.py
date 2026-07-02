@@ -68,6 +68,10 @@ bads = [
     and info["imp"] > IMP_THRESH
 ]
 raw.info["bads"] = bads
+
+# ze względu na szum, raw.plot()
+raw.info["bads"].append("T7")
+
 print(f"Bads ({len(raw.info['bads'])}): {raw.info['bads']}")
 
 
