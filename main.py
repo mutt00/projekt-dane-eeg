@@ -51,7 +51,7 @@ raw.set_montage("easycap-M1", match_case=False, on_missing="warn")
 
 raw.notch_filter(
     freqs=[60], # US; harmonics (120, 180...) already covered by low-pass
-    method="firwin",
+    method="fir",
     filter_length="10s"
 )
 
