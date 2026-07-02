@@ -107,7 +107,12 @@ raw.set_annotations(raw.annotations + mne.Annotations(
 
 print(raw.info)
 
-raw.plot()
+# snippet of raw eeg before ICA
+raw.copy().crop(tmin=140, tmax=160).plot(
+    scalings=dict(eeg=20e-6),
+    duration=20,
+    n_channels=31
+)
 
 # plot sensors (electrodes)
 raw.plot_sensors(
@@ -122,7 +127,7 @@ spectrum = raw.compute_psd(
     method="welch",
     n_fft=int(4 * raw.info["sfreq"]),
     fmin=0,
-    fmax=100.0 # force Qt
+    fmax=140.0 # force Qt
 )
 
 # zapobiega przeciągania wykresu w kierunku minus nieskończoności
@@ -177,7 +182,11 @@ raw_after_manual_ica = raw.copy()
 ica.apply(raw_after_manual_ica)
 
 # check
-raw_after_manual_ica.plot()
+raw_after_manual_ica.copy().crop(tmin=140, tmax=160).plot(
+    scalings=dict(eeg=20e-6),
+    duration=20,
+    n_channels=31
+)
 
 
 #==== ICLabel ====#
