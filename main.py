@@ -75,6 +75,34 @@ raw.info["bads"].append("T7")
 print(f"Bads ({len(raw.info['bads'])}): {raw.info['bads']}")
 
 
+#==== Złe segmenty (burst) ====#
+
+# wyłapane w raw.plot(), wpisane ręcznie
+bad_segments = [
+    (144.449, 1.259, 'BAD_burst'),
+    (594.367, 3.630, 'BAD_burst'),
+    (599.392, 1.508, 'BAD_burst'),
+    (694.231, 0.326, 'BAD_burst'),
+    (745.447, 0.488, 'BAD_burst'),
+    (805.968, 0.852, 'BAD_burst'),
+    (814.383, 0.703, 'BAD_burst'),
+    (1113.212, 2.989, 'BAD_burst'),
+    (1408.841, 3.116, 'BAD_burst'),
+    (1447.342, 3.826, 'BAD_burst'),
+]
+
+onsets, durations, descriptions = zip(*bad_segments)
+
+raw.set_annotations(raw.annotations + mne.Annotations(
+    onset=list(onsets),
+    duration=list(durations),
+    description=list(descriptions),
+    orig_time=raw.info['meas_date'],
+))
+
+#print(raw.annotations)
+
+
 #==== Sanity check pre-ICA ====#
 
 print(raw.info)
