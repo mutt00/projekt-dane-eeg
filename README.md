@@ -7,19 +7,23 @@ git clone "https://github.com/mutt00/projekt-dane-eeg.git" && cd projekt-dane-ee
 
 datalad clone "https://github.com/OpenNeuroDatasets/ds007647.git" data
 datalad get data/sub-*
-
-python3 main.py
 ```
+
+- `main.py` runs the pipeline for all subjects.
+- `sub-01.ipynb` contains the same pipeline for `sub-01`.
 
 ## Results
 ![RewP (Oloriz & Hassall, 2026)](img/rewp-article.png)
-RewP (Oloriz & Hassall, 2026)
+
+- RewP (Oloriz & Hassall, 2026)
 
 ![RewP (reproduction)](img/rewp.png)
-RewP (reproduction)
+
+- RewP (reproduction)
 
 ![Sensors (reproduction)](img/sensors.png)
-Sensors (reproduction [`montage = easycap-M1`])
+
+- Sensors (reproduction [`montage = easycap-M1`])
 
 ## Analysis (per article)
 - Evoked responses for two conditions: learnable vs unlearnable task
