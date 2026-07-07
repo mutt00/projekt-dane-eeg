@@ -1,4 +1,5 @@
 data/
+derivatives/
 .ipynb_checkpoints/
 __pycache__/
 
