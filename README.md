@@ -11,6 +11,16 @@ datalad get data/sub-*
 python3 main.py
 ```
 
+## Results
+![RewP (Oloriz & Hassall, 2026)](img/rewp-article.png)
+RewP (Oloriz & Hassall, 2026)
+
+![RewP (reproduction)](img/rewp.png)
+RewP (reproduction)
+
+![Sensors (reproduction)](img/sensors.png)
+Sensors (reproduction [`montage = easycap-M1`])
+
 ## Analysis (per article)
 - Evoked responses for two conditions: learnable vs unlearnable task
 - RewP amplitude 240ms-340ms
