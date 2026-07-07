@@ -1,300 +1,249 @@
 import mne
-from mne.preprocessing import ICA
+from mne.preprocessing import ICA, annotate_amplitude
 from mne_icalabel import label_components
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from pathlib import Path
 
 
-mne.viz.set_browser_backend("qt") # pip install pyqt5 mne-qt-browser
-mne.set_log_level("ERROR")
+#mne.viz.set_browser_backend("qt")
+matplotlib.use("Agg")
+
+mne.set_log_level("CRITICAL")
 
 
-#==== Ładowanie danych ====#
-
-#PROJECT_PATH = Path.cwd() # jupyter
-PROJECT_PATH = Path(__file__).parent # bezpieczniejsze
-
+PROJECT_PATH = Path(__file__).parent
 DATA_DIR = "data"
+DERIV_DIR = "derivatives"
 
-raw = mne.io.read_raw_brainvision(
-    PROJECT_PATH / DATA_DIR / "sub-01" / "eeg" / "sub-01_task-differentdoors_eeg.vhdr",
-    preload = True
-)
+RESAMPLE_FREQ = 250.0
+L_FREQ, H_FREQ = 0.1, 30.0
+NOTCH_FREQ = 60.0
 
+MASTOIDS = ["M1", "M2"]
+ORIGINAL_REFS = ["Fz"]
+MONTAGE = "easycap-M1"
 
-#==== Podstawowy preprocessing ====#
+REWP_CHAN = "FCz"
+REWP_TMIN, REWP_TMAX = 0.240, 0.340
+EPOCH_TMIN, EPOCH_TMAX = -0.200, 0.600
+BASELINE = (-0.200, 0.0)
 
-# downsample to 500Hz
-raw.resample(sfreq=500, npad="auto")
+PTP_THRESH = 150e-6
+GRAD_THRESH = 40e-6
+CHAN_REJECT_PROP = 0.10
+MAX_BAD_CHANS = 3
 
-# ogólny filtr
-# - high-pass powyżej 0.1 Hz może zniekształcić ERPy
-# - w badaniu użyto low-pass 30 Hz oraz ICLabel, lecz
-#   ICLabel preferuje 1-100 Hz
-raw.filter(l_freq=0.1, h_freq=100.0, fir_design="firwin")
+ICA_L_FREQ = 1.0
+ICLABEL_PROB = 0.80
 
-# refka na Fz (z badania)
-raw.add_reference_channels(ref_channels=["Fz"])
+EVENT_ID = {
+    "unlearnable/win":   7,
+    "unlearnable/loss":  8,
+    "learnable/win":    17,
+    "learnable/loss":   18,
+}
 
-# re-reference na podstawie średniej ze wszystkich kanałów
-raw.set_eeg_reference("average", projection=False)
+ANNOT_TO_ID = {
+    "Stimulus/S  7":  7,
+    "Stimulus/S  8":  8,
+    "Stimulus/S 17": 17,
+    "Stimulus/S 18": 18,
+}
 
-# zmień nazwę M1/M2 na TP9/TP10 (najbliższy odpowiednik w montażu)
-# raw.rename_channels({"M1": "TP9", "M2": "TP10"})
 
-# usuń M1, M2 (nie używamy ich do re-reference)
-raw.drop_channels(["M1", "M2"], on_missing="warn")
+def mean_amp_uv(evk):
+    return (evk.copy().pick(REWP_CHAN)
+            .crop(REWP_TMIN, REWP_TMAX).data.mean() * 1e6)
 
-# ustaw montaż
-raw.set_montage("easycap-M1", match_case=False, on_missing="warn")
 
-raw.notch_filter(
-    freqs=[60], # US; harmonics (120, 180...) already covered by low-pass
-    method="fir",
-    filter_length="10s"
-)
+def process_subject(subject: str) -> dict | None:
+    print(f"\n===== {subject}")
 
+    vhdr = (PROJECT_PATH / DATA_DIR / subject / "eeg" /
+            f"{subject}_task-differentdoors_eeg.vhdr")
+    raw = mne.io.read_raw_brainvision(vhdr, preload=True)
 
-#==== Oznaczanie kanałów powyżej progu impedancji ====#
+    raw.resample(sfreq=RESAMPLE_FREQ, npad="auto")
 
-# 20 kOhms (z badania)
-IMP_THRESH = 20
-
-# dla każdego kanału, jeśli wartość impedancji nie jest
-# None i jest powyżej progu, zaznacz jako "bad"
-bads = [
-    channel for channel, info in raw.impedances.items()
-    if channel in raw.ch_names
-    and info.get("imp") is not None
-    and info["imp"] > IMP_THRESH
-]
-raw.info["bads"] = bads
-
-# ze względu na szum, raw.plot()
-raw.info["bads"].append("T7")
-
-print(f"Bads ({len(raw.info['bads'])}): {raw.info['bads']}")
-
-
-#==== Złe segmenty (burst) ====#
-
-# wyłapane w raw.plot(), wpisane ręcznie
-bad_segments = [
-    (144.449, 1.259, 'BAD_burst'),
-    (594.367, 3.630, 'BAD_burst'),
-    (599.392, 1.508, 'BAD_burst'),
-    (694.231, 0.326, 'BAD_burst'),
-    (745.447, 0.488, 'BAD_burst'),
-    (805.968, 0.852, 'BAD_burst'),
-    (814.383, 0.703, 'BAD_burst'),
-    (1113.212, 2.989, 'BAD_burst'),
-    (1408.841, 3.116, 'BAD_burst'),
-    (1447.342, 3.826, 'BAD_burst'),
-]
-
-onsets, durations, descriptions = zip(*bad_segments)
-
-raw.set_annotations(raw.annotations + mne.Annotations(
-    onset=list(onsets),
-    duration=list(durations),
-    description=list(descriptions),
-    orig_time=raw.info['meas_date'],
-))
-
-#print(raw.annotations)
-
-
-#==== Sanity check pre-ICA ====#
-
-print(raw.info)
-
-# snippet of raw eeg before ICA
-raw.copy().crop(tmin=140, tmax=160).plot(
-    scalings=dict(eeg=20e-6),
-    duration=20,
-    n_channels=31
-)
-
-# plot sensors (electrodes)
-raw.plot_sensors(
-    title="Sensor plot",
-    ch_groups='position',
-    show_names=True,
-    sphere="auto"
-)
-
-# PSD
-spectrum = raw.compute_psd(
-    method="welch",
-    n_fft=int(4 * raw.info["sfreq"]),
-    fmin=0,
-    fmax=140.0 # force Qt
-)
-
-# zapobiega przeciągania wykresu w kierunku minus nieskończoności
-# (Fz/ref == same zera)
-picks_no_fz = [channel for channel in raw.ch_names if channel != "Fz"]
-spectrum.plot(
-    average=False,
-    spatial_colors=True,
-    picks=picks_no_fz
-)
-
-
-#==== ICA ====#
-# Wymóg: filtr 1-100 Hz
-# uwaga: low-pass 100 Hz już zastosowany na raw
-
-raw_for_ica = raw.copy().filter(l_freq=1.0, h_freq=None, fir_design="firwin")
-
-n_channels = len(raw.ch_names) - len(raw.info["bads"])
-rank = mne.compute_rank(raw_for_ica, rank="info")
-print(f"n_channels (w tym Fz): {n_channels}")
-print(f"Ranga danych (auto): {rank['eeg']}")
-
-# MNE nie loguje utraty rangi na skutek refowania (?), więc:
-real_rank = rank['eeg'] - 1 # Fz reference
-print(f"Prawdziwa ranga danych: {real_rank}")
-
-# ICA na raw nie działało dobrze, ze względu charakterystyke artefaktów,
-# można też zrobić na epokach
-events, event_dict = mne.events_from_annotations(raw)
-epochs_for_manual_ica = mne.Epochs(
-    raw_for_ica, events, event_id=event_dict,
-    tmin=-0.2, tmax=0.6,
-    baseline=None, preload=True,
-    reject_by_annotation=True,
-)
-
-# uwaga: nie koniecznie deterministyczne, reprodukowalność wymaga
-# conajmniej tych samych danych (raw), tego samego random_state,
-# oraz tych samych parametrów (np. picard, ortho=F, extended=T)
-ica = ICA(
-    n_components=real_rank,
-    method="picard",
-    fit_params=dict(ortho=False, extended=True),
-    max_iter="auto",
-    random_state=97
-)
-ica.fit(epochs_for_manual_ica, decim=5)
-
-ica.plot_components() # topografia komponentów
-ica.plot_sources(raw.copy().crop(tmin=140, tmax=160)) # przykładowy odcinek
-
-# dobór komponentów na podstawie ica.plot_components() i ica.plot_sources(raw)
-manual_excludes = sorted(list(set([0, 17, 6, 8, 12, 15, 16, 17, 18, 21, 22, 26, 28, 25, 27])))
-print(f"Ręcznie wybrane komponenty ({len(manual_excludes)}/{ica.n_components_}): {manual_excludes}")
-
-ica.exclude = manual_excludes
-
-#ica.plot_properties(raw_for_ica, picks=ica.exclude)
-
-# porównanie z raw
-ica.plot_overlay(raw, exclude=ica.exclude)
-
-raw_after_manual_ica = raw.copy()
-ica.apply(raw_after_manual_ica)
-
-# check
-raw_after_manual_ica.copy().crop(tmin=140, tmax=160).plot(
-    scalings=dict(eeg=20e-6),
-    duration=20,
-    n_channels=31
-)
-
-
-#==== ICLabel ====#
-
-# ica = ICA(...)
-# ica.fit(...)
-
-# Algorytm ICLabel
-ic_labels = label_components(raw_for_ica, ica, method="iclabel")
-
-labels = ic_labels["labels"] # np. 'brain', 'eye blink', 'muscle artifact'
-probs = ic_labels["y_pred_proba"] # pewność modelu od 0.0 do 1.0
-
-# (Opcjonalnie) Wypisanie wyników do konsoli, żeby wiedzieć co się dzieje
-print("\n--- Wyniki klasyfikacji ICLabel ---")
-for idx, (label, prob) in enumerate(zip(labels, probs)):
-    print(f"IC{idx:02d}: {label:15s} (pewność: {prob:.2f})")
-
-# Oznaczenie artefaktów do usunięcia
-# (zostawiamy sygnały sklasyfikowane jako "brain" i "other")
-exclude_categories = ["muscle artifact", "eye blink", "heart beat", "line noise", "channel noise"]
-ica.exclude = [
-    idx for idx, label in enumerate(labels)
-    if label in exclude_categories
-]
-print(f"\nUsunięte komponenty (artefakty): {ica.exclude}")
-
-raw_after_iclabel = raw.copy()
-ica.apply(raw_after_iclabel)
-
-# check
-raw_after_iclabel.copy().crop(tmin=140, tmax=160).plot(
-    scalings=dict(eeg=20e-6),
-    duration=20,
-    n_channels=31
-)
-
-
-#==== Epochs, events ====#
-
-# załóżmy, że moje jest lepsze ;)
-#raw = raw_after_iclabel.copy()
-raw_after_ica = raw_after_manual_ica.copy()
-
-events, event_dict = mne.events_from_annotations(raw)
-print("\nEvent dictionary inferred from annotations:")
-for k,v in event_dict.items():
-    print(k, ".......",  v)
-
-epochs = mne.Epochs(
-    raw_after_ica,
-    events, 
-    event_id=event_dict,
-    tmin=-0.2, # (z badania)
-    tmax=0.6, # (z badania)
-    baseline=(-0.2, 0.0),
-    preload=True,
-    reject=None # Na tym etapie nic nie wyrzucamy!
-)
-
-# Tworzymy symulację odrzucania na kopii danych, żeby zidentyfikować zepsute kanały
-reject_criteria = dict(eeg=150e-6)
-epochs_test = epochs.copy().drop_bad(reject=reject_criteria)
-
-# Zliczamy, ile razy każda elektroda zepsuła epokę
-dropped_counts = {ch: 0 for ch in epochs.ch_names}
-total_epochs = len(epochs)
-
-# drop_log to lista, która mówi nam, co było powodem usunięcia danej epoki
-for drop_reason in epochs_test.drop_log:
-    # Jeśli powodem był skok napięcia na kanale, dodajemy punkt karny dla tej elektrody
-    for ch in drop_reason:
-        if ch in dropped_counts:
-            dropped_counts[ch] += 1
-
-# Szukamy elektrod, które psują więcej niż 10% epok
-threshold = 0.10 * total_epochs
-noisy_electrodes = [ch for ch, count in dropped_counts.items() if count > threshold]
-
-print(f"Zaszumione elektrody (>10% zepsutych epok): {noisy_electrodes}")
-
-# Decyzja zgodnie z tekstem (Interpolacja vs Wyrzucenie badanego)
-if len(noisy_electrodes) > 3:
-    # W normalnym workflow tutaj skrypt by przerwał działanie dla tego pliku
-    print("UWAGA: Badany ma więcej niż 3 zepsute elektrody! Zgodnie z artykułem wylatuje.")
-else:
-    # Oznaczamy elektrody jako zepsute na głównych danych
-    epochs.info['bads'] = noisy_electrodes
+    raw.filter(l_freq=L_FREQ, h_freq=H_FREQ, method="fir",
+               phase="zero", fir_design="firwin", verbose=False)
     
-    # Interpolujemy (odbudowujemy sygnał na podstawie dobrych sąsiadów)
-    epochs.interpolate_bads(reset_bads=True)
-    print("Złe elektrody zostały zinterpolowane.")
-    
-    # Właściwe drzucenie epok
-    # Teraz, gdy złe kanały są naprawione, aplikujemy nasze odrzucanie napięciowe (150 uV)
-    # na ostateczne dane, aby wyczyścić resztki (np. rzeczywiste ruchy głowy)
-    epochs.drop_bad(reject=reject_criteria)
-    print(f"Pozostało czystych epok do ERP: {len(epochs)}")
+    raw.add_reference_channels(ORIGINAL_REFS)
+    raw.set_eeg_reference(ref_channels=MASTOIDS, verbose=False)
+    raw.drop_channels(MASTOIDS)
+    raw.set_montage(MONTAGE, match_case=False, on_missing="warn")
+
+    automatic_rank = mne.compute_rank(raw, rank="info")["eeg"]
+    real_rank = automatic_rank - 1
+    print(f"Rank for ICA: {real_rank}")
+
+    raw_ica = raw.copy().filter(l_freq=ICA_L_FREQ, h_freq=None, verbose=False)
+
+    annot_bad, _ = annotate_amplitude(raw_ica, peak=1000e-6, bad_percent=50)
+    raw_ica.set_annotations(raw_ica.annotations + annot_bad)
+
+    ica = ICA(n_components=real_rank, method="infomax",
+              fit_params=dict(extended=True),
+              random_state=97, max_iter="auto")
+    ica.fit(raw_ica, reject_by_annotation=True)
+
+    labels = label_components(raw_ica, ica, method="iclabel")
+    exclude_idx = [
+        i for i, (lab, prob) in enumerate(
+            zip(labels["labels"], labels["y_pred_proba"]))
+        if lab in ("eye blink", "muscle artifact") and prob > ICLABEL_PROB
+    ]
+    ica.exclude = exclude_idx
+    ica.apply(raw)
+    print(f"ICA components removed: {len(exclude_idx)} ({exclude_idx})")
+
+    events, _ = mne.events_from_annotations(raw, event_id=ANNOT_TO_ID,
+                                            verbose=False)
+    epochs = mne.Epochs(raw, events, event_id=EVENT_ID,
+                        tmin=EPOCH_TMIN, tmax=EPOCH_TMAX, baseline=BASELINE,
+                        preload=True, reject=None, verbose=False)
+
+    data = epochs.get_data()
+    ptp = data.max(axis=2) - data.min(axis=2)
+    grad = np.abs(np.diff(data, axis=2)).max(axis=2)
+    bad_mask = (ptp > PTP_THRESH) | (grad > GRAD_THRESH)
+
+    chan_bad_prop = bad_mask.mean(axis=0)
+    noisy_chans = [epochs.ch_names[i]
+                   for i, p in enumerate(chan_bad_prop)
+                   if p > CHAN_REJECT_PROP]
+
+    print(f"Median PTP: {np.median(ptp)*1e6:.1f} µV")
+    print(f"Median grad: {np.median(grad)*1e6:.2f} µV/sample")
+    print(f"Fraction failing PTP: {(ptp > PTP_THRESH).mean():.3f}")
+    print(f"Fraction failing grad: {(grad > GRAD_THRESH).mean():.3f}")
+    for i, ch in enumerate(epochs.ch_names):
+        if chan_bad_prop[i] > CHAN_REJECT_PROP:
+            print(f"  {ch}: {chan_bad_prop[i]*100:.1f}% bad")
+        
+    if len(noisy_chans) > MAX_BAD_CHANS:
+        print(f"{subject} excluded: {len(noisy_chans)} noisy channels")
+        return None
+
+    good_ch_idx = [i for i, ch in enumerate(epochs.ch_names)
+                   if ch not in noisy_chans]
+    drop_epoch = bad_mask[:, good_ch_idx].any(axis=1)
+    epochs.drop(np.where(drop_epoch)[0], reason="artifact", verbose=False)
+
+    epochs.info["bads"] = noisy_chans
+    epochs.interpolate_bads(reset_bads=True, verbose=False)
+
+    print(f"Noisy channels interpolated: {noisy_chans}")
+    print(f"Epochs dropped: {int(drop_epoch.sum())} / {len(drop_epoch)}")
+
+    evokeds = {}
+    for cond in ("learnable", "unlearnable"):
+        win = epochs[f"{cond}/win"].average()
+        loss = epochs[f"{cond}/loss"].average()
+        diff = mne.combine_evoked([win, loss], weights=[1, -1])
+        evokeds[cond] = dict(win=win, loss=loss, diff=diff)
+
+    rewp_learn = mean_amp_uv(evokeds["learnable"]["diff"])
+    rewp_unlearn = mean_amp_uv(evokeds["unlearnable"]["diff"])
+    delta_rewp = rewp_learn - rewp_unlearn
+
+    print(f"{subject} RewP (learnable):   {rewp_learn:+.2f} µV")
+    print(f"{subject} RewP (unlearnable): {rewp_unlearn:+.2f} µV")
+    print(f"{subject} ΔRewP:              {delta_rewp:+.2f} µV")
+
+    subj_deriv = PROJECT_PATH / DERIV_DIR / subject
+    subj_deriv.mkdir(parents=True, exist_ok=True)
+    for cond, d in evokeds.items():
+        for kind, evk in d.items():
+            evk.save(subj_deriv / f"{subject}_{cond}_{kind}_ave.fif",
+                     overwrite=True)
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7), constrained_layout=True)
+    for j, cond in enumerate(("unlearnable", "learnable")):
+        mne.viz.plot_compare_evokeds(
+            {"win": evokeds[cond]["win"],
+             "loss": evokeds[cond]["loss"],
+             "difference": evokeds[cond]["diff"]},
+            picks=REWP_CHAN, axes=axes[0, j], show=False,
+            title=f"{cond.capitalize()} ({subject})")
+        evokeds[cond]["diff"].plot_topomap(
+            times=[(REWP_TMIN + REWP_TMAX) / 2],
+            average=REWP_TMAX - REWP_TMIN,
+            axes=axes[1, j], show=False, colorbar=False)
+    #fig.savefig(subj_deriv / f"{subject}_rewp_diagnostic.png", dpi=200)
+    #plt.close(fig)
+
+    return {
+        "subject": subject,
+        "rewp_learnable": rewp_learn,
+        "rewp_unlearnable": rewp_unlearn,
+        "delta_rewp": delta_rewp,
+        "n_ica_excluded": len(exclude_idx),
+        "n_bad_chans": len(noisy_chans),
+        "n_epochs_dropped": int(drop_epoch.sum()),
+        "n_epochs_kept": len(epochs),
+    }, evokeds
+
+
+def main():
+    subjects = sorted(p.name for p in (PROJECT_PATH / DATA_DIR).glob("sub-*")
+                      if p.is_dir())
+    print(f"Found {len(subjects)} subjects")
+
+    all_measures = []
+    all_evokeds = {
+        "learnable":   {"win": [], "loss": [], "diff": []},
+        "unlearnable": {"win": [], "loss": [], "diff": []},
+    }
+
+    for sub in subjects:
+        try:
+            out = process_subject(sub)
+        except Exception as e:
+            print(f"{sub} failed: {type(e).__name__}: {e}")
+            continue
+        if out is None:
+            continue
+
+        measures, evokeds = out
+        all_measures.append(measures)
+        for cond in ("learnable", "unlearnable"):
+            for kind in ("win", "loss", "diff"):
+                all_evokeds[cond][kind].append(evokeds[cond][kind])
+
+    deriv_root = PROJECT_PATH / DERIV_DIR
+    deriv_root.mkdir(exist_ok=True)
+    pd.DataFrame(all_measures).to_csv(
+        deriv_root / "group_measures.tsv", sep="\t", index=False)
+
+    grand = {cond: {k: mne.grand_average(v) for k, v in d.items()}
+             for cond, d in all_evokeds.items()}
+    for cond, d in grand.items():
+        for kind, evk in d.items():
+            evk.save(deriv_root / f"grand_{cond}_{kind}_ave.fif",
+                     overwrite=True)
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7), constrained_layout=True)
+    for j, cond in enumerate(("unlearnable", "learnable")):
+        mne.viz.plot_compare_evokeds(
+            {"win": grand[cond]["win"],
+             "loss": grand[cond]["loss"],
+             "difference": grand[cond]["diff"]},
+            picks=REWP_CHAN, axes=axes[0, j], show=False,
+            title=cond.capitalize())
+        grand[cond]["diff"].plot_topomap(
+            times=[(REWP_TMIN + REWP_TMAX) / 2],
+            average=REWP_TMAX - REWP_TMIN,
+            axes=axes[1, j], show=False, colorbar=False)
+    fig.savefig(deriv_root / "figure2_grand_average.png", dpi=200)
+    plt.show()
+
+    print(f"\n{len(all_measures)}/{len(subjects)} subjects retained")
+    print(f"Outputs written to {deriv_root}")
+
+
+if __name__ == "__main__":
+    main()
